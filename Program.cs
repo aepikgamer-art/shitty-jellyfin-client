@@ -1,27 +1,37 @@
 using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Net.Http;
-using System.Net.Http.Json;
+using System.Drawing;
 using System.Text;
 using System.Text.Json;
+using System.Net.Http;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using LibVLCSharp.Shared;
+using LibVLCSharp.WinForms;
 
 namespace ShittyJellyfin
 {
-    // The whole app. One file. We don't do architecture here.
+    // Still one file. We're consistent about being inconsistent.
     public class MainForm : Form
     {
         private readonly HttpClient _http = new HttpClient();
         private string _baseUrl, _token, _userId;
         private TextBox _serverBox, _userBox, _passBox;
         private FlowLayoutPanel _moviePanel;
+        private VideoView _videoView;
+        private TrackBar _seekBar;
+        private Timer _tickTimer;
+        private LibVLC _libvlc;
+        private MediaPlayer _player;
+        private bool _seeking;
 
         public MainForm()
         {
-            Text = "shitty jellyfin client (yes it looks like this on purpose)";
-            Width = 1000; Height = 700;
+            Text = "shitty jellyfin client (now with REAL playback, still no taste)";
+            Width = 1100; Height = 720;
+
+            Core.Initialize();
+            _libvlc = new LibVLC("--no-osd");
+            _player = new MediaPlayer(_libvlc);
 
             var top = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 40 };
             _serverBox = new TextBox { Width = 220, Text = "http://192.168.1.10:8096" };
@@ -31,10 +41,35 @@ namespace ShittyJellyfin
             login.Click += async (s, e) => await Login();
             top.Controls.AddRange(new Control[] { _serverBox, _userBox, _passBox, login });
 
-            _moviePanel = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoScroll = true };
+            var bottom = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 50 };
+            _seekBar = new TrackBar { Width = 500, Minimum = 0, Maximum = 1000 };
+            _seekBar.MouseDown += (s, e) => _seeking = true;
+            _seekBar.MouseUp += async (s, e) =>
+            {
+                _seeking = false;
+                if (_player.Length > 0)
+                    await _player.SetTimeAsync((long)(_seekBar.Value / 1000.0 * _player.Length));
+            };
+            bottom.Controls.Add(new Label { Text = "seek:", AutoSize = true, Padding = new Padding(0, 12, 0, 0) });
+            bottom.Controls.Add(_seekBar);
 
+            _videoView = new VideoView { Dock = DockStyle.Fill };
+            _videoView.MediaPlayer = _player;
+
+            _moviePanel = new FlowLayoutPanel { Dock = DockStyle.Left, Width = 240, AutoScroll = true, BackColor = Color.FromArgb(18, 18, 24) };
+
+            Controls.Add(_videoView);
             Controls.Add(_moviePanel);
+            Controls.Add(bottom);
             Controls.Add(top);
+
+            _tickTimer = new Timer { Interval = 500 };
+            _tickTimer.Tick += (s, e) =>
+            {
+                if (!_seeking && _player.Length > 0)
+                    _seekBar.Value = (int)(_player.Time / (double)_player.Length * 1000);
+            };
+            _tickTimer.Start();
         }
 
         private async Task Login()
@@ -54,13 +89,13 @@ namespace ShittyJellyfin
             }
             catch (Exception ex)
             {
-                MessageBox.Show("login died: " + ex.Message); // error handling is a MessageBox, cope
+                MessageBox.Show("login died: " + ex.Message); // error handling is still a MessageBox, cope
             }
         }
 
         private async Task LoadMovies()
         {
-            var url = _baseUrl + "/Users/" + _userId + "/Items?IncludeItemTypes=Movie&Recursive=true&Fields=PrimaryImageAspectRatio";
+            var url = _baseUrl + "/Users/" + _userId + "/Items?IncludeItemTypes=Movie,Episode&Recursive=true";
             var resp = await _http.GetStringAsync(url);
             using var doc = JsonDocument.Parse(resp);
             _moviePanel.Controls.Clear();
@@ -68,17 +103,25 @@ namespace ShittyJellyfin
             {
                 var name = item.GetProperty("Name").GetString();
                 var id = item.GetProperty("Id").GetString();
-                var btn = new Button { Width = 220, Height = 60, Text = name };
-                btn.Click += (s, e) => Play(id); // double click?? nah. single click. deal with it.
+                var btn = new Button { Width = 220, Height = 50, Text = name, FlatStyle = FlatStyle.Flat };
+                btn.Click += (s, e) => Play(id);
                 _moviePanel.Controls.Add(btn);
             }
         }
 
         private void Play(string id)
         {
-            // "media player" = your browser. we are not writing a video decoder today.
+            // REAL in-app playback. VLC does the heavy lifting, we take the credit.
             var streamUrl = _baseUrl + "/Videos/" + id + "/stream.mp4?api_key=" + _token;
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(streamUrl) { UseShellExecute = true });
+            using var media = new Media(_libvlc, new Uri(streamUrl));
+            _player.Play(media);
+        }
+
+        protected override void OnFormClosed(FormClosedEventArgs e)
+        {
+            _player?.Dispose();
+            _libvlc?.Dispose();
+            base.OnFormClosed(e);
         }
 
         [STAThread]

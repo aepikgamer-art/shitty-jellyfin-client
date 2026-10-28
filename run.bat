@@ -1,3 +1,5 @@
 @echo off
-rem the "installer": launches the powershell client. no sdk, no browser, no regrets.
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0client.ps1"
+rem the "installer": launches the python client. needs python + VLC installed,
+rem both signed and trusted, so Smart App Control does not have a meltdown.
+pip show python-vlc >nul 2>&1 || pip install python-vlc
+start "" pythonw "%~dp0client.py"

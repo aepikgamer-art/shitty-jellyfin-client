@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>shitty jellyfin client</title>
+<style>
+  body { margin:0; background:#121218; color:#eee; font-family:Consolas,monospace; display:flex; height:100vh; }
+  #sidebar { width:260px; overflow-y:auto; background:#1b1b24; padding:8px; }
+  #sidebar button { display:block; width:100%; margin-bottom:6px; padding:8px; text-align:left; background:#2a2a36; color:#eee; border:none; cursor:pointer; font-family:inherit; }
+  #sidebar button:hover { background:#3a3a4a; }
+  #main { flex:1; display:flex; flex-direction:column; }
+  #top { padding:8px; background:#1b1b24; display:flex; gap:6px; }
+  input { background:#2a2a36; color:#eee; border:1px solid #444; padding:6px; font-family:inherit; }
+  button.login { padding:6px 14px; background:#3a3a4a; color:#eee; border:none; cursor:pointer; }
+  video { flex:1; width:100%; background:black; }
+  #status { padding:4px 8px; color:#888; font-size:12px; }
+</style>
+</head>
+<body>
+<div id="sidebar"></div>
+<div id="main">
+  <div id="top">
+    <input id="server" size="24" value="http://192.168.1.10:8096">
+    <input id="user" size="12" value="username">
+    <input id="pass" type="password" size="12">
+    <button class="login" onclick="login()">Login</button>
+  </div>
+  <video id="player" controls></video>
+  <div id="status">waiting for login... (it's a video tag. that's the whole player.)</div>
+</div>
+<script>
+let baseUrl, token, userId;
+
+async function login() {
+  try {
+    baseUrl = document.getElementById('server').value.trim().replace(/\/$/, '');
+    const body = JSON.stringify({ Username: document.getElementById('user').value, Pw: document.getElementById('pass').value });
+    const r = await fetch(baseUrl + '/Users/AuthenticateByName', { method:'POST', headers:{'Content-Type':'application/json'}, body });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const j = await r.json();
+    token = j.AccessToken; userId = j.User.Id;
+    await loadItems();
+  } catch (e) {
+    alert('login died: ' + e.message); // error handling is an alert. cope.
+  }
+}
+
+async function loadItems() {
+  const url = baseUrl + '/Users/' + userId + '/Items?IncludeItemTypes=Movie,Episode&Recursive=true';
+  const r = await fetch(url, { headers: { 'X-Emby-Token': token } });
+  const j = await r.json();
+  const side = document.getElementById('sidebar');
+  side.innerHTML = '';
+  j.Items.forEach(item => {
+    const b = document.createElement('button');
+    b.textContent = item.Name;
+    b.onclick = () => play(item.Id, item.Name); // click. just click. deal with it.
+    side.appendChild(b);
+  });
+  document.getElementById('status').textContent = j.Items.length + ' things found. no posters, no taste.';
+}
+
+function play(id, name) {
+  const player = document.getElementById('player');
+  player.src = baseUrl + '/Videos/' + id + '/stream.mp4?api_key=' + token;
+  player.play();
+  document.getElementById('status').textContent = 'now playing: ' + name + ' (in the player. as requested.)';
+}
+</script>
+</body>
+</html>
